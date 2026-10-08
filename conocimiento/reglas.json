@@ -1,0 +1,389 @@
+{
+  "metadata": {
+    "nombre": "SE Conversacional - Soporte Técnico Laptops/PCs",
+    "version": "2.0.0",
+    "descripcion": "Diagnóstico conversacional por descripción + preguntas mínimas"
+  },
+  "patrones": {
+    "tipo_laptop": [
+      "laptop",
+      "portatil",
+      "portátil",
+      "notebook",
+      "ultrabook"
+    ],
+    "tipo_pc": [
+      "pc",
+      "escritorio",
+      "torre",
+      "desktop"
+    ],
+    "no_enciende": [
+      "no enciende",
+      "no prende",
+      "no arranca",
+      "no da vida",
+      "no responde",
+      "no se enciende"
+    ],
+    "enciende": [
+      "si enciende",
+      "enciende",
+      "prende",
+      "arranca",
+      "se enciende",
+      "sí enciende"
+    ],
+    "sin_luces": [
+      "sin luces",
+      "no encienden leds",
+      "sin led",
+      "sin indicador",
+      "no hay luces"
+    ],
+    "sin_ventilador": [
+      "no gira ventilador",
+      "sin ventilador",
+      "ventilador parado",
+      "no gira el ventilador"
+    ],
+    "sin_imagen": [
+      "sin imagen",
+      "pantalla negra",
+      "no hay imagen",
+      "negra la pantalla",
+      "no se ve nada",
+      "black screen",
+      "pantalla en negro"
+    ],
+    "queda_logo": [
+      "se queda en logo",
+      "queda en bios",
+      "no pasa logo",
+      "atascado en logo",
+      "se queda en el logo",
+      "no carga windows",
+      "queda en fabricante"
+    ],
+    "bsod": [
+      "pantalla azul",
+      "bsod",
+      "blue screen",
+      "pantallazo azul",
+      "stop error",
+      "código de error",
+      "codigo de error"
+    ],
+    "calienta": [
+      "se calienta",
+      "muy caliente",
+      "sobrecalienta",
+      "temperatura alta",
+      "se calienta mucho"
+    ],
+    "ruidos": [
+      "hace ruido",
+      "ruido raro",
+      "clic",
+      "zumbido",
+      "chirrido",
+      "ruidos extraños",
+      "hace ruidos"
+    ],
+    "disco": [
+      "disco",
+      "hdd",
+      "ssd",
+      "fallo disco",
+      "bad sector",
+      "disco duro",
+      "unidad de disco"
+    ],
+    "lento": [
+      "lento",
+      "muy lento",
+      "va lento",
+      "tarda mucho",
+      "se cuelga",
+      "va muy lento"
+    ],
+    "wifi": [
+      "wifi",
+      "wi-fi",
+      "internet",
+      "no conecta red",
+      "sin red inalambrica",
+      "no conecta wifi",
+      "problema de wifi"
+    ],
+    "audio": [
+      "audio",
+      "sonido",
+      "altavoz",
+      "auriculares",
+      "no hay sonido",
+      "mudo",
+      "sin sonido"
+    ],
+    "carga": [
+      "no carga",
+      "no carga bateria",
+      "bateria no carga",
+      "queda sin carga",
+      "no carga la batería",
+      "no me carga"
+    ],
+    "conectado": [
+      "conectado",
+      "corriente",
+      "enchufado",
+      "adaptador puesto",
+      "conectado a corriente",
+      "enchufado a corriente"
+    ]
+  },
+  "hipotesis": [
+    {
+      "id": "H_BSOD",
+      "match": [
+        "bsod"
+      ],
+      "prioridad": 95
+    },
+    {
+      "id": "H_NO_ENCIENDE",
+      "match": [
+        "no_enciende",
+        "sin_luces"
+      ],
+      "prioridad": 94
+    },
+    {
+      "id": "H_RUIDO_DISCO",
+      "match": [
+        "ruidos",
+        "disco"
+      ],
+      "prioridad": 93
+    },
+    {
+      "id": "H_SIN_IMAGEN",
+      "match": [
+        "sin_imagen"
+      ],
+      "prioridad": 92
+    },
+    {
+      "id": "H_ARRANQUE_SO",
+      "match": [
+        "queda_logo"
+      ],
+      "prioridad": 90
+    },
+    {
+      "id": "H_NO_CARGA",
+      "match": [
+        "carga"
+      ],
+      "prioridad": 88
+    },
+    {
+      "id": "H_CALIENTA",
+      "match": [
+        "calienta"
+      ],
+      "prioridad": 86
+    },
+    {
+      "id": "H_LENTO",
+      "match": [
+        "lento"
+      ],
+      "prioridad": 80
+    },
+    {
+      "id": "H_WIFI",
+      "match": [
+        "wifi"
+      ],
+      "prioridad": 75
+    },
+    {
+      "id": "H_AUDIO",
+      "match": [
+        "audio"
+      ],
+      "prioridad": 75
+    }
+  ],
+  "plan_resolucion": {
+    "H_NO_ENCIENDE": {
+      "titulo": "Equipo NO enciende (sin signos aparentes de vida)",
+      "preguntar": [
+        "es_laptop",
+        "conectado_a_corriente",
+        "encienden_leds",
+        "gira_ventilador"
+      ],
+      "pasos": [
+        "Verifica que el adaptador esté bien conectado (toma + equipo).",
+        "Si es portátil: prueba SOLO con adaptador (retira batería si es extraíble).",
+        "Hard reset: desconecta todo, mantén botón de encendido 10–15 segundos.",
+        "Prueba otro adaptador compatible si puedes.",
+        "Si hay LEDs/ventilador pero NO hay imagen: prueba pantalla externa.",
+        "Si NO hay luces NI ventilador: posible fallo de adaptador/DC-in/placa. Deriva a técnico."
+      ],
+      "explicacion": "Ausencia total de respuesta suele indicar problema de ruta de alimentación."
+    },
+    "H_SIN_IMAGEN": {
+      "titulo": "Enciende pero NO hay imagen en pantalla",
+      "preguntar": [
+        "enciende",
+        "se_ve_logo_bios",
+        "probo_pantalla_externa",
+        "gira_ventilador",
+        "encienden_leds"
+      ],
+      "pasos": [
+        "Sube brillo (Fn+brillo) y comprueba que no esté en modo proyector.",
+        "Prueba con pantalla externa (HDMI/VGA). Si SÍ hay imagen → fallo panel/LCD/backlight.",
+        "Si NO hay imagen externa → hard reset (desconectar, batería extraíble fuera, mantener power 60s).",
+        "Revisa RAM si es extraíble (con precaución).",
+        "Si persiste sin imagen externa → sospecha GPU/RAM/placa. Deriva a técnico."
+      ],
+      "explicacion": "La prueba de pantalla externa permite diferenciar entre fallo de panel y de placa."
+    },
+    "H_BSOD": {
+      "titulo": "Pantallas azules (BSOD) al arrancar o usar el equipo",
+      "preguntar": [
+        "enciende",
+        "llega_a_so",
+        "aparece_bsod",
+        "codigo_error"
+      ],
+      "pasos": [
+        "Anota el código de error exacto (lo más completo posible).",
+        "Arranca en Modo Seguro (desde recuperación) y desinstala drivers instalados recientemente.",
+        "Ejecuta sfc /scannow y chkdsk C: /f /r si puedes acceder a SO.",
+        "Comprueba RAM con diagnóstico y estado del disco (SMART).",
+        "Si empezó justo tras instalar hardware/drivers → vuelve a configuración anterior."
+      ],
+      "explicacion": "BSOD suele estar relacionado con drivers, RAM inestable o errores del disco."
+    },
+    "H_ARRANQUE_SO": {
+      "titulo": "Se queda en logo/fabricante y NO carga el SO",
+      "preguntar": [
+        "se_ve_logo_bios",
+        "detecta_disco_bios",
+        "intento_reparacion_arranque"
+      ],
+      "pasos": [
+        "Entra a BIOS/UEFI y comprueba orden de arranque (disco correcto).",
+        "Verifica si el disco aparece detectado en BIOS.",
+        "Usa medio de recuperación para 'Reparación de inicio'.",
+        "Si NO aparece el disco → revisa conexiones o prueba en otro equipo.",
+        "Si SÍ aparece pero no arranca → reparar arranque (BCD)."
+      ],
+      "explicacion": "POST pasa pero el cargador de SO no logra inicializar desde el disco."
+    },
+    "H_NO_CARGA": {
+      "titulo": "No carga batería (portátil)",
+      "preguntar": [
+        "es_laptop",
+        "conectado_a_corriente",
+        "enciende_led_carga",
+        "bateria_extraible"
+      ],
+      "pasos": [
+        "Prueba con otro cargador compatible.",
+        "Con batería extraíble: quítala y enciende SOLO con adaptador.",
+        "Limpia conector DC con cuidado (sin forzar).",
+        "Si con otro cargador NO enciende LED de carga → DC-in/circuito de carga.",
+        "Si carga de forma intermitente → cable/conector desgastado."
+      ],
+      "explicacion": "Falta de indicación de carga sugiere problema de alimentación o circuito de carga."
+    },
+    "H_CALIENTA": {
+      "titulo": "Sobrecalentamiento",
+      "preguntar": [
+        "se_apaga_solo",
+        "ruido_ventilador",
+        "bloquea_respira"
+      ],
+      "pasos": [
+        "Usa el equipo sobre superficie dura (nunca sobre tela blanda).",
+        "Limpia rejillas/ventiladores con aire comprimido con precaución.",
+        "Comprueba que ventiladores giran correctamente.",
+        "Si se apaga solo bajo carga → requiere limpieza + posible pasta térmica.",
+        "Si persiste tras limpieza → derivar a revisión térmica."
+      ],
+      "explicacion": "El polvo o bloqueo de respiraderos reduce la disipación térmica."
+    },
+    "H_RUIDO_DISCO": {
+      "titulo": "Ruidos sospechosos (HDD)",
+      "preguntar": [
+        "tipo_ruido",
+        "hay_datos_importantes",
+        "arranca_so"
+      ],
+      "pasos": [
+        "PRIORITARIO: Haz BACKUP YA si hay datos importantes.",
+        "Si son CLICS repetidos → riesgo muy alto (fallo mecánico inminente).",
+        "NO sigas usando el equipo intensivamente para minimizar daño.",
+        "Si no puedes acceder a datos → valorar recuperación especializada.",
+        "Tras recuperar, considera reemplazo por SSD."
+      ],
+      "explicacion": "Clics repetidos son característicos del 'click of death' en discos HDD."
+    },
+    "H_LENTO": {
+      "titulo": "Equipo muy lento",
+      "preguntar": [
+        "es_hdd_o_ssd",
+        "muchos_programas_inicio",
+        "disco_lleno"
+      ],
+      "pasos": [
+        "Revisa programas de inicio (Administrador de tareas).",
+        "Libera espacio en disco (ideal >15–20% libre).",
+        "Desfragmenta SOLO si es HDD. NO desfragmentar SSD.",
+        "Escanea en busca de malware.",
+        "Si es HDD antiguo → cambio a SSD mejora notablemente.",
+        "Revisa consumo de RAM (aplicaciones abiertas)."
+      ],
+      "explicacion": "Lentitud suele deberse a software, poco espacio o disco mecánico lento."
+    },
+    "H_WIFI": {
+      "titulo": "Problema con WiFi/conexión inalámbrica",
+      "preguntar": [
+        "funciona_otro_dispositivo",
+        "detecta_redes",
+        "error_conexion"
+      ],
+      "pasos": [
+        "Activa/desactiva WiFi y Modo Avión.",
+        "Reinicia router y equipo.",
+        "Olvida la red y vuelve a conectarte.",
+        "Actualiza drivers del adaptador WiFi.",
+        "Prueba con cable Ethernet para descartar router.",
+        "Si solo falla este equipo → adaptador WiFi. Si fallan todos → router."
+      ],
+      "explicacion": "Aislar si el fallo es de red o del adaptador ayuda a enfocar."
+    },
+    "H_AUDIO": {
+      "titulo": "Problema con audio/sonido",
+      "preguntar": [
+        "sale_por_auriculares",
+        "silenciado",
+        "detecta_dispositivo"
+      ],
+      "pasos": [
+        "Comprueba dispositivo de reproducción correcto (Sonido).",
+        "Sube volumen y asegúrate de que NO esté silenciado.",
+        "Prueba auriculares vs altavoces.",
+        "Reinstala drivers de audio.",
+        "Ejecuta solucionador de audio si está disponible."
+      ],
+      "explicacion": "Lo más común es dispositivo de salida incorrecto o driver."
+    }
+  }
+}
