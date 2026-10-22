@@ -11,6 +11,12 @@ class MotorConversacional:
     Motor conversacional: recibe descripción en lenguaje natural,
     extrae síntomas, genera hipótesis, hace preguntas mínimas
     y propone diagnóstico con pasos de resolución.
+
+    La GUI (gui.py) consume este motor mediante:
+        - establecer_descripcion(texto)
+        - responder_pregunta(pregunta_id, respuesta, modo)
+        - siguiente_accion()
+        - obtener_estado_resumen()
     """
 
     def __init__(self, ruta_kb: str = "conocimiento/reglas.json"):
@@ -18,6 +24,7 @@ class MotorConversacional:
         self.kb: Dict[str, Any] = {}
         self.estado: Dict[str, Any] = {
             "descripcion": "",
+            "notas": [],
             "hechos": {},  # clave -> valor (si/no/no_sabe)
             "sospechas": [],
             "hipotesis_activa": None,
@@ -35,12 +42,85 @@ class MotorConversacional:
     def limpiar(self) -> None:
         self.estado = {
             "descripcion": "",
+            "notas": [],
             "hechos": {},
             "sospechas": [],
             "hipotesis_activa": None,
             "preguntas_hechas": [],
             "etapa": "inicio",
         }
+
+    # ------------------------------------------------------------------
+    # API de compatibilidad con la interfaz gráfica
+    # ------------------------------------------------------------------
+
+    def obtener_estado_resumen(self) -> Dict[str, Any]:
+        """Devuelve una copia compacta del estado actual (para la GUI)."""
+        return {
+            "descripcion": self.estado.get("descripcion", ""),
+            "notas": list(self.estado.get("notas", [])),
+            "hechos": dict(self.estado.get("hechos", {})),
+            "sospechas": list(self.estado.get("sospechas", [])),
+            "hipotesis_activa": self.estado.get("hipotesis_activa"),
+            "preguntas_hechas": list(self.estado.get("preguntas_hechas", [])),
+            "etapa": self.estado.get("etapa", "inicio"),
+        }
+
+    def responder_pregunta(
+        self,
+        pregunta_id: str,
+        respuesta: str,
+        modo: str = "cerrado",
+    ) -> Dict[str, Any]:
+        """
+        Registra la respuesta del usuario a una pregunta del grafo.
+
+        modo="cerrado": la respuesta es un valor de dominio (si / no / no_sabe /
+                        ssd / hdd / clics...). Se guarda como hecho.
+        modo="libre":   la respuesta es texto del usuario. Se guarda como hecho
+                        y además se analiza con los patrones de la base de
+                        conocimiento para extraer síntomas adicionales.
+        """
+        texto = (respuesta or "").strip()
+        if not texto:
+            return self.obtener_estado_resumen()
+
+        v = self._normalizar(texto)
+
+        if v in ("si", "s", "yes", "y"):
+            self.establecer_hecho(pregunta_id, "si")
+        elif v in ("no", "n"):
+            self.establecer_hecho(pregunta_id, "no")
+        elif v in ("no_sabe", "ns", "nose", "no se", "no estoy seguro", "desconozco"):
+            self.establecer_hecho(pregunta_id, "no_sabe")
+        elif modo == "libre":
+            self.establecer_hecho(pregunta_id, texto)
+            self.registrar_texto_libre(texto)
+        else:
+            self.establecer_hecho(pregunta_id, texto)
+
+        # Regla de dominio: si no es portátil, es PC de escritorio.
+        if pregunta_id == "es_laptop":
+            if self.estado["hechos"].get("es_laptop") == "no":
+                self.establecer_hecho("es_pc", "si")
+            elif self.estado["hechos"].get("es_laptop") == "si":
+                self.estado["hechos"].pop("es_pc", None)
+
+        return self.obtener_estado_resumen()
+
+    def registrar_texto_libre(self, texto: str) -> None:
+        """
+        Analiza texto libre del usuario con los patrones de la base de
+        conocimiento SIN sobrescribir la descripción inicial de la sesión.
+        """
+        if not texto:
+            return
+        self.estado.setdefault("notas", []).append(texto)
+        self._extraer_de_texto(texto)
+
+    # ------------------------------------------------------------------
+    # Lógica de grafo (no modificar: aquí manda reglas.json)
+    # ------------------------------------------------------------------
 
     def _normalizar(self, t: str) -> str:
         if not t:
@@ -233,9 +313,27 @@ class MotorConversacional:
                     "texto": "¿Consigue llegar al escritorio/sistema operativo? (si/no/no_sabe)",
                 },
             ]
+            # Cada mínima se pregunta una sola vez y en orden: así la GUI
+            # (o la consola) puede avanzar en vez de repetir la misma.
+            for p in preguntas_min:
+                if p["id"] in self.estado.get("hechos", {}):
+                    continue
+                if p["id"] in self.estado.get("preguntas_hechas", []):
+                    continue
+                self.estado.setdefault("preguntas_hechas", []).append(p["id"])
+                return {
+                    "tipo": "preguntar_minima",
+                    "preguntas": [p],
+                    "pregunta_id": p["id"],
+                    "texto": p["texto"],
+                }
             return {
-                "tipo": "preguntar_minima",
-                "preguntas": preguntas_min,
+                "tipo": "sin_informacion",
+                "texto": (
+                    "Con los datos que tengo todavía no puedo afinar el diagnóstico. "
+                    "Cuéntame algo más (por ejemplo: ¿se queda en el logo? ¿pantalla azul? "
+                    "¿hace ruidos el disco? ¿se calienta?) o empieza de nuevo."
+                ),
             }
 
         for pid in plan.get("preguntar", []):

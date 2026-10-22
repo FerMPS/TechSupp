@@ -1,0 +1,1133 @@
+# gui.py
+# Ventana de escritorio (GUI) del sistema experto de soporte técnico.
+#
+# Esta capa NO reescribe el sistema experto: consume tal cual
+#   - motor.py                 -> grafo de diagnóstico (siguiente_accion, responder_pregunta...)
+#   - conocimiento/reglas.json -> base de conocimiento (planes de resolución)
+#   - explicacion.py           -> explicación del razonamiento
+#
+# La GUI solo presenta lo que el motor decide: preguntas del grafo,
+# diagnóstico final y pasos de resolución.
+#
+# Dependencia:  pip install customtkinter
+#
+# Uso:  python main.py
+#
+# ---------------------------------------------------------------------------
+# NOTA SOBRE EL CAMPO DE ENTRADA
+# ---------------------------------------------------------------------------
+# Se usa CTkTextbox (y NO CTkEntry) por un bug de CustomTkinter 5.2.2:
+# el "placeholder" de CTkEntry se INSERTA dentro del Entry y, mientras está
+# activo, CTkEntry.get() devuelve "" aunque haya texto escrito. Además,
+# reconfigurar el placeholder en caliente lo reactivaba sin que llegara un
+# evento <FocusIn>, de modo que el envío de texto nunca se ejecutaba.
+# CTkTextbox no tiene placeholder: get("1.0", "end-1c") devuelve siempre
+# el texto real, sin depender del foco.
+# ---------------------------------------------------------------------------
+
+from __future__ import annotations
+
+import os
+import subprocess
+import sys
+from dataclasses import dataclass
+from typing import Any, Dict, List, Optional, Sequence, Tuple
+
+# ---------------------------------------------------------------------------
+# Bootstrap de CustomTkinter: si no está, se intenta instalar; si falla,
+# se muestra un error claro y se detiene.
+# ---------------------------------------------------------------------------
+
+ctk = None
+_ERROR_CUSTOMTKINTER: Optional[str] = None
+
+
+def _importar_customtkinter() -> bool:
+    global ctk, _ERROR_CUSTOMTKINTER
+    try:
+        import customtkinter as _ctk
+
+        ctk = _ctk
+        _ERROR_CUSTOMTKINTER = None
+        return True
+    except Exception as exc:  # pragma: no cover
+        _ERROR_CUSTOMTKINTER = str(exc)
+        return False
+
+
+def _instalar_paquete(nombre: str) -> bool:
+    try:
+        subprocess.check_call(
+            [sys.executable, "-m", "pip", "install", nombre],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.STDOUT,
+        )
+        return True
+    except Exception:  # pragma: no cover
+        return False
+
+
+if not _importar_customtkinter():
+    if os.environ.get("SE_GUIA_SIN_AUTOINSTALAR") != "1":
+        print("CustomTkinter no está instalado. Intentando instalarlo automáticamente...")
+        if _instalar_paquete("customtkinter"):
+            _importar_customtkinter()
+    if ctk is None:
+        _ERROR_CUSTOMTKINTER = _ERROR_CUSTOMTKINTER or "paquete no encontrado"
+
+
+def mostrar_error_fatal(mensaje: str, titulo: str = "Sistema Experto - Error") -> None:
+    """Muestra un error claro al usuario (ventana en Windows o consola)."""
+    print(f"\n[ERROR] {mensaje}\n", file=sys.stderr)
+    if sys.platform.startswith("win"):
+        try:
+            import ctypes
+
+            ctypes.windll.user32.MessageBoxW(None, str(mensaje), titulo, 0x10)
+            return
+        except Exception:  # pragma: no cover
+            pass
+    try:
+        import tkinter
+
+        raiz = tkinter.Tk()
+        raiz.withdraw()
+        from tkinter import messagebox
+
+        messagebox.showerror(titulo, str(mensaje))
+        raiz.destroy()
+    except Exception:  # pragma: no cover
+        pass
+
+
+def customtkinter_disponible() -> bool:
+    return ctk is not None
+
+
+# Si CustomTkinter no está disponible, ChatApp será una clase vacía que
+# falla con un mensaje explícito al instanciarse.
+_BaseVentana = ctk.CTk if ctk is not None else object
+
+# ---------------------------------------------------------------------------
+# Paleta: grises + verde (estilo moderno, minimalista, claro)
+# ---------------------------------------------------------------------------
+
+COLOR_FONDO = "#F5F5F5"  # gris muy claro: fondo de la aplicación
+COLOR_SUPERFICIE = "#FFFFFF"  # tarjetas, cabecera y campo de entrada
+COLOR_BURBUJA_ASISTENTE = "#E0E0E0"  # gris claro: burbujas del asistente
+COLOR_BURBUJA_USUARIO = "#4CAF50"  # verde: burbujas del usuario
+COLOR_TEXTO_ASISTENTE = "#212121"  # gris oscuro: texto del asistente
+COLOR_TEXTO_USUARIO = "#FFFFFF"  # blanco: texto del usuario
+COLOR_BOTON = "#4CAF50"  # verde: botones principales
+COLOR_BOTON_HOVER = "#45A049"  # verde más oscuro: hover
+COLOR_TEXTO = "#212121"  # texto general
+COLOR_TEXTO_SUAVE = "#70757F"  # gris medio: subtítulos y metadatos
+COLOR_BORDE = "#E3E5E8"  # bordes y separadores
+COLOR_BORDE_FUERTE = "#D5D8DD"  # borde del campo de entrada
+COLOR_OPCION = "#FFFFFF"  # botones de respuesta rápida
+COLOR_OPCION_HOVER = "#E9EBEE"  # hover de respuesta rápida
+COLOR_ENTRADA = "#FFFFFF"  # fondo del campo de entrada
+COLOR_OK = "#2E7D32"  # verde oscuro: títulos de diagnóstico
+
+# ---------------------------------------------------------------------------
+# Categorías de diagnóstico de la pantalla de inicio
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class Categoria:
+    id: str
+    etiqueta: str
+    descripcion: str
+    semilla: str  # texto con el que se alimenta el motor (patrones del KB)
+    saludo: str  # mensaje de bienvenida del asistente
+    pregunta_inicial: Optional[Tuple[str, str]] = None  # (pregunta_id, texto)
+
+
+CATEGORIAS: List[Categoria] = [
+    Categoria(
+        id="no_enciende",
+        etiqueta="No enciende",
+        descripcion="Sin luces ni respuesta al botón de encendido",
+        semilla="no enciende",
+        saludo="Vaya, lo siento. Vamos a ver qué pasa.",
+        pregunta_inicial=(
+            "encienden_leds",
+            "¿Ves alguna luz encendida en la torre o el cargador?",
+        ),
+    ),
+    Categoria(
+        id="pantalla_negra",
+        etiqueta="Pantalla negra",
+        descripcion="Enciende pero no se ve imagen en la pantalla",
+        semilla="pantalla negra",
+        saludo="Entiendo, la pantalla en negro da mucha rabia. Vamos a descartarlo paso a paso.",
+        pregunta_inicial=(
+            "enciende",
+            "¿El equipo se enciende con normalidad y lo único que ves es la pantalla en negro?",
+        ),
+    ),
+    Categoria(
+        id="va_lento",
+        etiqueta="Va lento",
+        descripcion="Tarda mucho en arrancar o se cuelga a ratos",
+        semilla="va lento",
+        saludo="Vale, la lentitud casi siempre tiene causa. Vamos a localizar dónde se atasca.",
+        pregunta_inicial=(
+            "es_hdd_o_ssd",
+            "¿Sabes si el disco de tu equipo es un SSD o un HDD tradicional?",
+        ),
+    ),
+    Categoria(
+        id="wifi",
+        etiqueta="WiFi",
+        descripcion="Problemas de conexión inalámbrica",
+        semilla="problemas de wifi",
+        saludo="Las redes se diagnostican rápido: averiguamos si el fallo es del equipo o del router.",
+        pregunta_inicial=(
+            "funciona_otro_dispositivo",
+            "¿Con otro dispositivo (móvil, otra portátil) el WiFi de la misma red sí funciona?",
+        ),
+    ),
+    Categoria(
+        id="otro",
+        etiqueta="Otro",
+        descripcion="Cuéntame el problema con tus propias palabras",
+        semilla="",
+        saludo="Sin problema, cuéntame qué ocurre y lo desciframos juntos.",
+        pregunta_inicial=None,
+    ),
+]
+
+# ---------------------------------------------------------------------------
+# Respuestas rápidas por pregunta del grafo
+# ---------------------------------------------------------------------------
+
+OPCIONES_POR_DEFECTO: List[Tuple[str, str]] = [
+    ("Sí", "si"),
+    ("No", "no"),
+    ("No estoy seguro", "no_sabe"),
+]
+
+OPCIONES_POR_PREGUNTA: Dict[str, List[Tuple[str, str]]] = {
+    "es_laptop": [
+        ("Sí, es un portátil", "si"),
+        ("No, es un PC de escritorio", "no"),
+        ("No estoy seguro", "no_sabe"),
+    ],
+    "es_hdd_o_ssd": [
+        ("Es un SSD", "ssd"),
+        ("Es un HDD", "hdd"),
+        ("No estoy seguro", "no_sabe"),
+    ],
+    "tipo_ruido": [
+        ("Clics", "clics"),
+        ("Zumbido", "zumbido"),
+        ("Chirrido", "chirrido"),
+        ("No estoy seguro", "no_sabe"),
+    ],
+    # Preguntas abiertas: se responden escribiendo en el campo de texto.
+    "codigo_error": [],
+    "error_conexion": [],
+}
+
+ETIQUETAS_HECHOS: Dict[str, str] = {
+    "es_laptop": "Portátil",
+    "es_pc": "PC",
+    "enciende": "Enciende",
+    "tiene_imagen": "Hay imagen",
+    "se_ve_logo_bios": "Logo/BIOS",
+    "llega_a_so": "Llega al SO",
+    "aparece_bsod": "Pantalla azul",
+    "calienta": "Se calienta",
+    "hay_ruidos": "Ruidos",
+    "sospecha_disco": "Sospecha disco",
+    "lento": "Lento",
+    "problema_wifi": "WiFi",
+    "problema_audio": "Audio",
+    "carga_bateria": "Carga batería",
+    "conectado_a_corriente": "A corriente",
+    "encienden_leds": "LEDs",
+    "gira_ventilador": "Ventilador",
+    "arranca_so": "Arranca SO",
+    "es_hdd_o_ssd": "Disco",
+    "disco_lleno": "Espacio libre",
+    "muchos_programas_inicio": "Arranque lento",
+    "funciona_otro_dispositivo": "Otro dispositivo",
+    "detecta_redes": "Detecta redes",
+}
+
+
+# ---------------------------------------------------------------------------
+# Aplicación
+# ---------------------------------------------------------------------------
+
+
+class ChatApp(_BaseVentana):
+    """Ventana principal: pantalla de inicio + chat conversacional."""
+
+    def __init__(self, motor: Any = None, explicador: Any = None) -> None:
+        if ctk is None:
+            raise RuntimeError(
+                "CustomTkinter no está disponible. Instálalo con:  pip install customtkinter"
+            )
+
+        super().__init__()
+
+        # Motor y explicador: si no se pasan, se crean con los valores por defecto.
+        if motor is None:
+            from motor import MotorConversacional
+
+            motor = MotorConversacional()
+        if explicador is None:
+            from explicacion import Explicador
+
+            explicador = Explicador()
+        self.motor = motor
+        self.explicador = explicador
+
+        ctk.set_appearance_mode("light")
+        ctk.set_default_color_theme("green")
+
+        self.title("Asistente de Soporte Técnico")
+        self.geometry("1020x700")
+        self.minsize(840, 560)
+        self.grid_columnconfigure(0, weight=1)
+        self.grid_rowconfigure(0, weight=1)
+
+        # Estado de la conversación
+        self._categoria_actual: Optional[Categoria] = None
+        self._pregunta_actual: Optional[Dict[str, Any]] = None
+        self._fila_actual = 0
+        self._burbujas: List[Any] = []
+        self._frame_opciones: Optional[Any] = None
+        self._label_indicador: Optional[Any] = None
+        self._label_razonamiento: Optional[Any] = None
+        self._diagnostico_mostrado = False
+        self._descripciones_pedidas = 0
+        self._sin_info_veces = 0
+        self._plan_actual: Dict[str, Any] = {}
+
+        self._crear_pantalla_inicio()
+        self._crear_pantalla_chat()
+        self.mostrar_inicio()
+
+        self.bind("<Configure>", self._on_resize)
+        # Enter envía también cuando el foco está en otro widget.
+        self.bind("<Return>", self._on_enter)
+        self.bind("<KP_Enter>", self._on_enter)
+        self.after(80, self._centrar_ventana)
+
+    # ------------------------------------------------------------------
+    # Pantalla 1: inicio
+    # ------------------------------------------------------------------
+
+    def _crear_pantalla_inicio(self) -> None:
+        self.frame_inicio = ctk.CTkFrame(self, corner_radius=0, fg_color=COLOR_FONDO)
+        self.frame_inicio.grid(row=0, column=0, sticky="nsew")
+        self.frame_inicio.grid_columnconfigure(0, weight=1)
+        self.frame_inicio.grid_rowconfigure(3, weight=1)
+
+        ctk.CTkLabel(
+            self.frame_inicio,
+            text="Asistente de Soporte Técnico",
+            font=ctk.CTkFont(size=30, weight="bold"),
+            text_color=COLOR_TEXTO,
+        ).grid(row=0, column=0, pady=(46, 8))
+
+        ctk.CTkLabel(
+            self.frame_inicio,
+            text="Diagnóstico guiado para portátiles y PCs de escritorio.\n"
+            "Elige el síntoma principal y te iré haciendo las preguntas necesarias.",
+            font=ctk.CTkFont(size=14),
+            text_color=COLOR_TEXTO_SUAVE,
+            justify="center",
+        ).grid(row=1, column=0, padx=40)
+
+        self.frame_botones = ctk.CTkFrame(self.frame_inicio, fg_color="transparent")
+        self.frame_botones.grid(row=2, column=0, padx=70, pady=(30, 10), sticky="ew")
+        self.frame_botones.grid_columnconfigure(0, weight=1, uniform="botones")
+        self.frame_botones.grid_columnconfigure(1, weight=1, uniform="botones")
+
+        for indice, categoria in enumerate(CATEGORIAS):
+            fila, columna = divmod(indice, 2)
+            self.frame_botones.grid_rowconfigure(fila, weight=1)
+            self._crear_boton_categoria(categoria, fila, columna)
+
+        ctk.CTkLabel(
+            self.frame_inicio,
+            text="Podrás reiniciar el diagnóstico en cualquier momento desde la cabecera del chat.",
+            font=ctk.CTkFont(size=12),
+            text_color=COLOR_TEXTO_SUAVE,
+        ).grid(row=4, column=0, pady=(0, 26))
+
+    def _crear_boton_categoria(self, categoria: Categoria, fila: int, columna: int) -> None:
+        tarjeta = ctk.CTkFrame(
+            self.frame_botones,
+            fg_color=COLOR_SUPERFICIE,
+            corner_radius=16,
+            border_width=1,
+            border_color=COLOR_BORDE,
+        )
+        tarjeta.grid(row=fila, column=columna, padx=10, pady=10, sticky="nsew")
+        tarjeta.grid_columnconfigure(0, weight=1)
+
+        ctk.CTkButton(
+            tarjeta,
+            text=categoria.etiqueta,
+            font=ctk.CTkFont(size=19, weight="bold"),
+            height=88,
+            corner_radius=12,
+            fg_color=COLOR_BOTON,
+            hover_color=COLOR_BOTON_HOVER,
+            text_color=COLOR_TEXTO_USUARIO,
+            command=lambda c=categoria: self.iniciar_categoria(c),
+        ).grid(row=0, column=0, padx=16, pady=(16, 6), sticky="ew")
+
+        ctk.CTkLabel(
+            tarjeta,
+            text=categoria.descripcion,
+            font=ctk.CTkFont(size=12),
+            text_color=COLOR_TEXTO_SUAVE,
+            justify="left",
+            anchor="w",
+            wraplength=250,
+        ).grid(row=1, column=0, padx=18, pady=(0, 16), sticky="ew")
+
+    # ------------------------------------------------------------------
+    # Pantalla 2: chat
+    # ------------------------------------------------------------------
+
+    def _crear_pantalla_chat(self) -> None:
+        self.frame_chat = ctk.CTkFrame(self, corner_radius=0, fg_color=COLOR_FONDO)
+        self.frame_chat.grid(row=0, column=0, sticky="nsew")
+        self.frame_chat.grid_columnconfigure(0, weight=1)
+        self.frame_chat.grid_rowconfigure(1, weight=1)
+
+        # Cabecera
+        self.frame_cabecera = ctk.CTkFrame(self.frame_chat, fg_color=COLOR_SUPERFICIE, corner_radius=0, height=62)
+        self.frame_cabecera.grid(row=0, column=0, sticky="ew")
+        self.frame_cabecera.grid_columnconfigure(0, weight=1)
+
+        self.label_cabecera = ctk.CTkLabel(
+            self.frame_cabecera,
+            text="Diagnóstico",
+            font=ctk.CTkFont(size=16, weight="bold"),
+            text_color=COLOR_TEXTO,
+            anchor="w",
+        )
+        self.label_cabecera.grid(row=0, column=0, padx=24, pady=16, sticky="ew")
+
+        ctk.CTkButton(
+            self.frame_cabecera,
+            text="Reiniciar",
+            width=112,
+            height=36,
+            corner_radius=10,
+            fg_color=COLOR_OPCION,
+            hover_color=COLOR_OPCION_HOVER,
+            text_color=COLOR_TEXTO,
+            font=ctk.CTkFont(size=13),
+            command=self.reiniciar,
+        ).grid(row=0, column=1, padx=(0, 20), pady=13)
+
+        # Separador de la cabecera (línea de 1 px pegada al borde inferior)
+        ctk.CTkFrame(self.frame_chat, fg_color=COLOR_BORDE, height=1, corner_radius=0).grid(
+            row=0, column=0, sticky="ews"
+        )
+
+        # Área de scroll con las burbujas
+        self.chat_area = ctk.CTkScrollableFrame(
+            self.frame_chat,
+            fg_color=COLOR_FONDO,
+            corner_radius=0,
+            scrollbar_button_color=COLOR_BORDE_FUERTE,
+            scrollbar_button_hover_color=COLOR_TEXTO_SUAVE,
+        )
+        self.chat_area.grid(row=1, column=0, sticky="nsew", padx=16, pady=(14, 4))
+        self.chat_area.grid_columnconfigure(0, weight=1)
+        self.chat_area.grid_columnconfigure(1, weight=0)
+
+        # Pista + datos confirmados
+        self.frame_estado = ctk.CTkFrame(self.frame_chat, fg_color="transparent")
+        self.frame_estado.grid(row=2, column=0, sticky="ew", padx=24, pady=(2, 0))
+        self.frame_estado.grid_columnconfigure(0, weight=1)
+
+        self.label_pista = ctk.CTkLabel(
+            self.frame_estado,
+            text="Escribe tu respuesta y pulsa Enter para enviar",
+            font=ctk.CTkFont(size=11),
+            text_color=COLOR_TEXTO_SUAVE,
+            anchor="w",
+        )
+        self.label_pista.grid(row=0, column=0, sticky="w")
+
+        self.label_datos = ctk.CTkLabel(
+            self.frame_estado,
+            text="",
+            font=ctk.CTkFont(size=11),
+            text_color=COLOR_TEXTO_SUAVE,
+            anchor="e",
+        )
+        self.label_datos.grid(row=0, column=1, sticky="e")
+
+        # Entrada de texto + botón enviar
+        self.frame_entrada = ctk.CTkFrame(self.frame_chat, fg_color="transparent")
+        self.frame_entrada.grid(row=3, column=0, sticky="ew", padx=16, pady=(8, 18))
+        self.frame_entrada.grid_columnconfigure(0, weight=1)
+        self.frame_entrada.grid_rowconfigure(0, weight=1)
+
+        # Contenedor de altura fija: así el campo y el botón "Enviar" quedan
+        # exactamente alineados (el Text interno pide más altura de la natural).
+        self.frame_campo = ctk.CTkFrame(
+            self.frame_entrada, fg_color="transparent", corner_radius=0, height=46
+        )
+        self.frame_campo.grid(row=0, column=0, sticky="ew", padx=(0, 10))
+        self.frame_campo.grid_propagate(False)
+        self.frame_campo.grid_columnconfigure(0, weight=1)
+        self.frame_campo.grid_rowconfigure(0, weight=1)
+
+        # CTkTextbox en vez de CTkEntry: sin placeholder, get() siempre fiable.
+        self.entrada = ctk.CTkTextbox(
+            self.frame_campo,
+            height=46,
+            corner_radius=12,
+            border_width=1,
+            border_color=COLOR_BORDE_FUERTE,
+            fg_color=COLOR_ENTRADA,
+            text_color=COLOR_TEXTO,
+            font=ctk.CTkFont(size=14),
+            activate_scrollbars=False,
+            wrap="word",
+            padx=14,
+            pady=6,
+        )
+        self.entrada.grid(row=0, column=0, sticky="nsew")
+
+        # Enter envía (en el textbox) y también si el foco está en otro sitio.
+        self.entrada.bind("<Return>", self._on_enter)
+        self.entrada.bind("<KP_Enter>", self._on_enter)
+        self.entrada.bind("<FocusIn>", self._on_entrada_foco)
+        self.entrada.bind("<FocusOut>", self._on_entrada_sin_foco)
+
+        self.boton_enviar = ctk.CTkButton(
+            self.frame_entrada,
+            text="Enviar",
+            width=118,
+            height=46,
+            corner_radius=12,
+            fg_color=COLOR_BOTON,
+            hover_color=COLOR_BOTON_HOVER,
+            text_color=COLOR_TEXTO_USUARIO,
+            font=ctk.CTkFont(size=14, weight="bold"),
+            command=self._on_enviar,
+        )
+        self.boton_enviar.grid(row=0, column=1, sticky="nsew")
+
+    # ------------------------------------------------------------------
+    # Cambio de pantallas
+    # ------------------------------------------------------------------
+
+    def mostrar_inicio(self) -> None:
+        self.frame_chat.grid_forget()
+        self.frame_inicio.grid(row=0, column=0, sticky="nsew")
+        self.frame_inicio.tkraise()
+
+    def mostrar_chat(self) -> None:
+        self.frame_inicio.grid_forget()
+        self.frame_chat.grid(row=0, column=0, sticky="nsew")
+        self.frame_chat.tkraise()
+        self._foco_entrada()
+
+    def reiniciar(self) -> None:
+        """Vuelve a la pantalla de inicio y limpia el motor."""
+        self.motor.limpiar()
+        self._categoria_actual = None
+        self._pregunta_actual = None
+        self._diagnostico_mostrado = False
+        self._descripciones_pedidas = 0
+        self._sin_info_veces = 0
+        self._limpiar_chat()
+        self.label_datos.configure(text="")
+        self.label_pista.configure(text="Escribe tu respuesta y pulsa Enter para enviar")
+        self.mostrar_inicio()
+
+    # ------------------------------------------------------------------
+    # Campo de entrada (envío de texto libre)
+    # ------------------------------------------------------------------
+
+    def _texto_entrada(self) -> str:
+        """Devuelve el texto real escrito por el usuario (sin espacios sobrantes)."""
+        try:
+            texto = self.entrada.get("1.0", "end-1c")
+        except Exception:  # pragma: no cover
+            texto = ""
+        return (texto or "").strip()
+
+    def _limpiar_entrada(self) -> None:
+        try:
+            self.entrada.delete("1.0", "end")
+        except Exception:  # pragma: no cover
+            pass
+        self._asegurar_entrada_activa()
+
+    def _asegurar_entrada_activa(self) -> None:
+        """Evita que el campo quede deshabilitado (bloquearía la escritura)."""
+        try:
+            if str(self.entrada.cget("state")) != "normal":
+                self.entrada.configure(state="normal")
+        except Exception:  # pragma: no cover
+            try:
+                self.entrada.configure(state="normal")
+            except Exception:
+                pass
+
+    def _foco_en_boton(self) -> bool:
+        """True si el foco actual está en algún botón (para no robarlo)."""
+        try:
+            foco = self.focus_get()
+            while foco is not None:
+                if foco.__class__.__name__ == "CTkButton":
+                    return True
+                foco = getattr(foco, "master", None)
+        except Exception:  # pragma: no cover
+            pass
+        return False
+
+    def _foco_entrada(self, forzar: bool = True) -> None:
+        if not forzar and self._foco_en_boton():
+            return
+        try:
+            self.entrada.focus_set()
+        except Exception:  # pragma: no cover
+            pass
+
+    def _on_entrada_foco(self, evento: Any = None) -> None:
+        try:
+            self.entrada.configure(border_color=COLOR_BOTON)
+        except Exception:  # pragma: no cover
+            pass
+
+    def _on_entrada_sin_foco(self, evento: Any = None) -> None:
+        try:
+            self.entrada.configure(border_color=COLOR_BORDE_FUERTE)
+        except Exception:  # pragma: no cover
+            pass
+
+    def _on_enter(self, evento: Any = None) -> str:
+        """Enter: envía el texto. 'break' evita que se inserte un salto de línea."""
+        self._on_enviar()
+        return "break"
+
+    def _on_enviar(self) -> None:
+        """Envío de texto libre: leer -> mostrar -> limpiar -> pasar al motor."""
+        texto = self._texto_entrada()
+        if not texto:
+            self._foco_entrada(forzar=False)
+            return
+
+        self._limpiar_entrada()
+        self._agregar_burbuja(texto, rol="usuario")
+
+        pregunta_id = self._pregunta_actual.get("id") if self._pregunta_actual else None
+        self._pregunta_actual = None
+
+        self._mostrar_indicador()
+        self.after(250, lambda: self._registrar_texto(pregunta_id, texto))
+
+    # ------------------------------------------------------------------
+    # Burbujas de chat
+    # ------------------------------------------------------------------
+
+    def _ancho_texto(self) -> int:
+        ancho = self.winfo_width() or 1020
+        return max(280, min(560, ancho - 240))
+
+    def _agregar_burbuja(self, texto: str, rol: str = "asistente") -> None:
+        wrap = self._ancho_texto()
+        if rol == "usuario":
+            etiqueta = ctk.CTkLabel(
+                self.chat_area,
+                text=texto,
+                fg_color=COLOR_BURBUJA_USUARIO,
+                text_color=COLOR_TEXTO_USUARIO,
+                corner_radius=18,
+                wraplength=wrap,
+                justify="left",
+                font=ctk.CTkFont(size=14),
+            )
+            etiqueta.grid(row=self._fila_actual, column=1, sticky="e", padx=(60, 4), pady=3)
+        else:
+            etiqueta = ctk.CTkLabel(
+                self.chat_area,
+                text=texto,
+                fg_color=COLOR_BURBUJA_ASISTENTE,
+                text_color=COLOR_TEXTO_ASISTENTE,
+                corner_radius=18,
+                wraplength=wrap,
+                justify="left",
+                font=ctk.CTkFont(size=14),
+            )
+            etiqueta.grid(row=self._fila_actual, column=0, sticky="w", padx=(4, 60), pady=3)
+
+        self._fila_actual += 1
+        self._burbujas.append(etiqueta)
+        self._scroll_al_final()
+
+    def _agregar_tarjeta(self) -> Any:
+        """Crea una tarjeta a ancho completo (diagnóstico)."""
+        tarjeta = ctk.CTkFrame(
+            self.chat_area,
+            fg_color=COLOR_SUPERFICIE,
+            corner_radius=14,
+            border_width=1,
+            border_color=COLOR_BORDE,
+        )
+        tarjeta.grid(row=self._fila_actual, column=0, columnspan=2, sticky="ew", padx=4, pady=10)
+        tarjeta.grid_columnconfigure(0, weight=1)
+        self._fila_actual += 1
+        self._scroll_al_final()
+        return tarjeta
+
+    def _agregar_opciones(self, opciones: Sequence[Tuple[str, str]]) -> None:
+        self._limpiar_opciones()
+        marco = ctk.CTkFrame(self.chat_area, fg_color="transparent")
+        marco.grid(row=self._fila_actual, column=0, sticky="w", padx=(4, 60), pady=(2, 10))
+        for indice, (etiqueta, valor) in enumerate(opciones):
+            ctk.CTkButton(
+                marco,
+                text=etiqueta,
+                height=36,
+                corner_radius=18,
+                fg_color=COLOR_OPCION,
+                hover_color=COLOR_OPCION_HOVER,
+                text_color=COLOR_TEXTO,
+                border_width=1,
+                border_color=COLOR_BORDE_FUERTE,
+                font=ctk.CTkFont(size=13),
+                command=lambda e=etiqueta, v=valor: self._on_opcion(e, v),
+            ).grid(row=0, column=indice, padx=(0, 8))
+        self._frame_opciones = marco
+        self._fila_actual += 1
+        self._scroll_al_final()
+
+    def _limpiar_opciones(self) -> None:
+        if self._frame_opciones is not None:
+            try:
+                self._frame_opciones.destroy()
+            except Exception:  # pragma: no cover
+                pass
+            self._frame_opciones = None
+
+    def _mostrar_indicador(self) -> None:
+        self._quitar_indicador()
+        self._label_indicador = ctk.CTkLabel(
+            self.chat_area,
+            text="Escribiendo...",
+            fg_color=COLOR_BURBUJA_ASISTENTE,
+            text_color=COLOR_TEXTO_SUAVE,
+            corner_radius=18,
+            font=ctk.CTkFont(size=13, slant="italic"),
+        )
+        self._label_indicador.grid(row=self._fila_actual, column=0, sticky="w", padx=(4, 60), pady=3)
+        self._fila_actual += 1
+        self._scroll_al_final()
+
+    def _quitar_indicador(self) -> None:
+        if self._label_indicador is not None:
+            try:
+                self._label_indicador.destroy()
+            except Exception:  # pragma: no cover
+                pass
+            self._label_indicador = None
+
+    def _limpiar_chat(self) -> None:
+        self._quitar_indicador()
+        self._limpiar_opciones()
+        for hijo in self.chat_area.winfo_children():
+            try:
+                hijo.destroy()
+            except Exception:  # pragma: no cover
+                pass
+        self._burbujas = []
+        self._fila_actual = 0
+        self._label_razonamiento = None
+        self._limpiar_entrada()
+
+    def _scroll_al_final(self) -> None:
+        def _hacer() -> None:
+            try:
+                self.chat_area._parent_canvas.yview_moveto(1.0)
+            except Exception:  # pragma: no cover
+                pass
+
+        self.after(90, _hacer)
+
+    def _on_resize(self, evento: Any = None) -> None:
+        wrap = self._ancho_texto()
+        for burbuja in self._burbujas:
+            try:
+                burbuja.configure(wraplength=wrap)
+            except Exception:  # pragma: no cover
+                pass
+
+    def _centrar_ventana(self) -> None:
+        try:
+            ancho = self.winfo_width()
+            alto = self.winfo_height()
+            x = max(0, (self.winfo_screenwidth() - ancho) // 2)
+            y = max(0, (self.winfo_screenheight() - alto) // 2)
+            self.geometry(f"{ancho}x{alto}+{x}+{y}")
+        except Exception:  # pragma: no cover
+            pass
+
+    # ------------------------------------------------------------------
+    # Flujo conversacional (el motor manda: aquí solo se presenta)
+    # ------------------------------------------------------------------
+
+    def iniciar_categoria(self, categoria: Categoria) -> None:
+        """Arranca un diagnóstico nuevo con la categoría preseleccionada."""
+        self.motor.limpiar()
+        self._categoria_actual = categoria
+        self._pregunta_actual = None
+        self._diagnostico_mostrado = False
+        self._descripciones_pedidas = 0
+        self._sin_info_veces = 0
+        self._limpiar_chat()
+        self.label_cabecera.configure(text=f"Diagnóstico: {categoria.etiqueta}")
+        self.label_datos.configure(text="")
+        self.mostrar_chat()
+
+        if categoria.semilla:
+            self.motor.establecer_descripcion(categoria.semilla)
+
+        if categoria.pregunta_inicial:
+            # Saludo y primera pregunta en un único mensaje (como en el chat).
+            pregunta_id, texto = categoria.pregunta_inicial
+            self._agregar_burbuja(f"{categoria.saludo} {texto}")
+            self._mostrar_indicador()
+            self.after(350, lambda: self._preguntar(pregunta_id, texto, mostrar=False))
+        else:
+            self._agregar_burbuja(categoria.saludo)
+            self._mostrar_indicador()
+            self.after(350, self._avanzar)
+
+    def _preguntar(self, pregunta_id: str, texto: str, mostrar: bool = True) -> None:
+        """Presenta una pregunta del grafo (con respuestas rápidas si aplica)."""
+        self._quitar_indicador()
+        self._pregunta_actual = {"id": pregunta_id, "texto": texto}
+        if mostrar:
+            self._agregar_burbuja(texto)
+
+        opciones = OPCIONES_POR_PREGUNTA.get(pregunta_id, OPCIONES_POR_DEFECTO)
+        if opciones:
+            self._agregar_opciones(opciones)
+            self.label_pista.configure(text="Responde con un botón o escribe tu respuesta (Enter para enviar)")
+        else:
+            self.label_pista.configure(text="Escribe tu respuesta y pulsa Enter para enviar")
+        self._foco_entrada()
+
+    def _preguntar_descripcion(self, texto: str) -> None:
+        """Pide una descripción libre (categoría 'Otro' o sin síntomas detectados)."""
+        self._quitar_indicador()
+        self._descripciones_pedidas += 1
+        if self._descripciones_pedidas > 1:
+            texto = (
+                "Vamos a necesitar algo más de detalle. Por ejemplo: ¿se queda en el logo? "
+                "¿pantalla azul? ¿hace ruidos el disco? ¿se calienta? ¿no se conecta al WiFi?"
+            )
+        self._pregunta_actual = {"id": None, "texto": texto}
+        self._agregar_burbuja(texto)
+        self.label_pista.configure(text="Describe lo que ocurre y pulsa Enter para enviar")
+        self._foco_entrada()
+
+    def _preguntar_minima(self, accion: Dict[str, Any]) -> None:
+        pregunta_id = accion.get("pregunta_id")
+        texto = accion.get("texto")
+        if not pregunta_id:
+            for pregunta in accion.get("preguntas", []) or []:
+                if pregunta.get("id") not in self.motor.estado.get("hechos", {}):
+                    pregunta_id = pregunta.get("id")
+                    texto = pregunta.get("texto")
+                    break
+            if not pregunta_id:
+                preguntas = accion.get("preguntas", []) or []
+                if preguntas:
+                    pregunta_id = preguntas[0].get("id")
+                    texto = preguntas[0].get("texto")
+        if pregunta_id:
+            self._preguntar(pregunta_id, texto or "Cuéntame un poco más.")
+        else:  # pragma: no cover
+            self._sin_informacion("Necesito algún dato más para continuar.")
+
+    def _sin_informacion(self, texto: str) -> None:
+        self._quitar_indicador()
+        self._sin_info_veces += 1
+        if self._sin_info_veces > 1:
+            texto = (
+                "Sigo sin poder afinar el diagnóstico. Prueba con una descripción más concreta "
+                "(por ejemplo: 'no enciende', 'pantalla negra', 'va lento', 'no tiene wifi', "
+                "'pantalla azul', 'se calienta' o 'hace ruido el disco') o empieza de nuevo."
+            )
+        self._pregunta_actual = {"id": None, "texto": texto}
+        self._agregar_burbuja(texto)
+        self._agregar_opciones([("Empezar de nuevo", "reset")])
+        self.label_pista.configure(text="Escribe tu respuesta y pulsa Enter para enviar")
+        self._foco_entrada()
+
+    def _avanzar(self) -> None:
+        """Pide al motor la siguiente acción y la presenta en pantalla."""
+        self._quitar_indicador()
+        try:
+            accion = self.motor.siguiente_accion()
+        except Exception as exc:  # pragma: no cover
+            self._agregar_burbuja(f"Ha ocurrido un error al consultar el motor: {exc}")
+            return
+
+        tipo = accion.get("tipo")
+
+        if tipo == "preguntar":
+            self._preguntar(accion.get("pregunta_id"), accion.get("texto", "Cuéntame más."))
+        elif tipo == "preguntar_minima":
+            self._preguntar_minima(accion)
+        elif tipo == "diagnostico":
+            if self._diagnostico_mostrado:
+                self._agregar_burbuja(
+                    "He anotado tu comentario. ¿Quieres que te vuelva a mostrar el plan de pasos "
+                    "o empezamos de cero?"
+                )
+                self._agregar_opciones([("Ver el plan de pasos", "replan"), ("Empezar de nuevo", "reset")])
+                self._pregunta_actual = None
+                self.label_pista.configure(text="Escribe qué ha pasado al probar los pasos (Enter para enviar)")
+                self._foco_entrada()
+            else:
+                self._mostrar_diagnostico(accion)
+        elif tipo == "pedir_descripcion":
+            self._preguntar_descripcion(
+                accion.get("texto", "Describe el problema con tus palabras.")
+            )
+        elif tipo == "sin_informacion":
+            self._sin_informacion(accion.get("texto", "Necesito algo más de información."))
+        else:  # pragma: no cover
+            self._preguntar_descripcion("Cuéntame qué ocurre exactamente.")
+
+    # ------------------------------------------------------------------
+    # Respuestas del usuario
+    # ------------------------------------------------------------------
+
+    def _on_opcion(self, etiqueta: str, valor: str) -> None:
+        if valor == "reset":
+            self._limpiar_opciones()
+            self.reiniciar()
+            return
+        if valor == "replan":
+            self._limpiar_opciones()
+            self._mostrar_diagnostico(
+                {
+                    "tipo": "diagnostico",
+                    "plan": self._plan_actual,
+                    "hipotesis": self.motor.estado.get("hipotesis_activa"),
+                },
+                repetir=True,
+            )
+            return
+        if self._pregunta_actual is None:
+            return
+
+        self._limpiar_opciones()
+        self._agregar_burbuja(etiqueta, rol="usuario")
+        pregunta_id = self._pregunta_actual.get("id")
+        self._pregunta_actual = None
+
+        self._mostrar_indicador()
+        self.after(280, lambda: self._registrar_respuesta(pregunta_id, valor))
+
+    def _registrar_respuesta(self, pregunta_id: Optional[str], valor: str) -> None:
+        """Respuesta cerrada (botón Sí/No/...): va directa al grafo."""
+        if pregunta_id:
+            self.motor.responder_pregunta(pregunta_id, valor, modo="cerrado")
+        self._actualizar_resumen()
+        self._avanzar()
+
+    def _registrar_texto(self, pregunta_id: Optional[str], texto: str) -> None:
+        """Respuesta escrita por el usuario: se analiza con los patrones del KB."""
+        if pregunta_id:
+            self.motor.responder_pregunta(pregunta_id, texto, modo="libre")
+        else:
+            self.motor.establecer_descripcion(texto)
+        self._actualizar_resumen()
+        self._avanzar()
+
+    def _actualizar_resumen(self) -> None:
+        try:
+            resumen = self.motor.obtener_estado_resumen()
+        except Exception:  # pragma: no cover
+            return
+        partes = []
+        for clave, valor in (resumen.get("hechos") or {}).items():
+            nombre = ETIQUETAS_HECHOS.get(clave, clave)
+            partes.append(f"{nombre}: {valor}")
+        texto = " · ".join(partes)
+        if len(texto) > 70:
+            texto = "..." + texto[-68:]
+        self.label_datos.configure(text=texto)
+
+    # ------------------------------------------------------------------
+    # Diagnóstico final
+    # ------------------------------------------------------------------
+
+    def _mostrar_diagnostico(self, accion: Dict[str, Any], repetir: bool = False) -> None:
+        self._quitar_indicador()
+        plan = accion.get("plan", {}) or {}
+        self._plan_actual = plan
+        self._diagnostico_mostrado = True
+
+        tarjeta = self._agregar_tarjeta()
+
+        ctk.CTkLabel(
+            tarjeta,
+            text="DIAGNÓSTICO ORIENTATIVO",
+            font=ctk.CTkFont(size=12, weight="bold"),
+            text_color=COLOR_OK,
+            anchor="w",
+        ).grid(row=0, column=0, sticky="ew", padx=18, pady=(16, 2))
+
+        ctk.CTkLabel(
+            tarjeta,
+            text=plan.get("titulo", "Diagnóstico"),
+            font=ctk.CTkFont(size=17, weight="bold"),
+            text_color=COLOR_TEXTO,
+            anchor="w",
+            justify="left",
+            wraplength=self._ancho_texto() - 44,
+        ).grid(row=1, column=0, sticky="ew", padx=18)
+
+        if plan.get("explicacion"):
+            ctk.CTkLabel(
+                tarjeta,
+                text=plan["explicacion"],
+                font=ctk.CTkFont(size=13),
+                text_color=COLOR_TEXTO_SUAVE,
+                anchor="w",
+                justify="left",
+                wraplength=self._ancho_texto() - 44,
+            ).grid(row=2, column=0, sticky="ew", padx=18, pady=(4, 8))
+
+        pasos = plan.get("pasos", []) or []
+        if pasos:
+            ctk.CTkLabel(
+                tarjeta,
+                text="PASOS PRÁCTICOS (en orden)",
+                font=ctk.CTkFont(size=12, weight="bold"),
+                text_color=COLOR_TEXTO,
+                anchor="w",
+            ).grid(row=3, column=0, sticky="ew", padx=18, pady=(6, 2))
+            for indice, paso in enumerate(pasos, 1):
+                ctk.CTkLabel(
+                    tarjeta,
+                    text=f"{indice}. {paso}",
+                    font=ctk.CTkFont(size=13),
+                    text_color=COLOR_TEXTO,
+                    anchor="w",
+                    justify="left",
+                    wraplength=self._ancho_texto() - 64,
+                ).grid(row=3 + indice, column=0, sticky="ew", padx=24, pady=2)
+
+        # Razonamiento del sistema experto (explicacion.py)
+        try:
+            razonamiento = self.explicador.explicar(self.motor.estado, plan)
+        except Exception:  # pragma: no cover
+            razonamiento = ""
+        self._label_razonamiento = ctk.CTkLabel(
+            tarjeta,
+            text=razonamiento,
+            font=ctk.CTkFont(size=11),
+            text_color=COLOR_TEXTO_SUAVE,
+            anchor="w",
+            justify="left",
+            wraplength=self._ancho_texto() - 44,
+        )
+        self._label_razonamiento.grid(row=4 + len(pasos), column=0, sticky="ew", padx=18, pady=(8, 0))
+        self._label_razonamiento.grid_remove()
+
+        fila_botones = 5 + len(pasos)
+        marco_botones = ctk.CTkFrame(tarjeta, fg_color="transparent")
+        marco_botones.grid(row=fila_botones, column=0, sticky="w", padx=18, pady=(10, 16))
+
+        ctk.CTkButton(
+            marco_botones,
+            text="Ver razonamiento",
+            width=150,
+            height=34,
+            corner_radius=10,
+            fg_color=COLOR_OPCION,
+            hover_color=COLOR_OPCION_HOVER,
+            text_color=COLOR_TEXTO,
+            border_width=1,
+            border_color=COLOR_BORDE_FUERTE,
+            font=ctk.CTkFont(size=13),
+            command=self._alternar_razonamiento,
+        ).grid(row=0, column=0, padx=(0, 8))
+
+        ctk.CTkButton(
+            marco_botones,
+            text="Reiniciar diagnóstico",
+            width=170,
+            height=34,
+            corner_radius=10,
+            fg_color=COLOR_BOTON,
+            hover_color=COLOR_BOTON_HOVER,
+            text_color=COLOR_TEXTO_USUARIO,
+            font=ctk.CTkFont(size=13, weight="bold"),
+            command=self.reiniciar,
+        ).grid(row=0, column=1)
+
+        if not repetir:
+            self._agregar_burbuja(
+                "¿Te ha servido? Si pruebas los pasos, dime qué ocurre y afinamos el diagnóstico."
+            )
+        self._pregunta_actual = None
+        self.label_pista.configure(text="Cuéntame qué ha pasado al probar los pasos (Enter para enviar)")
+        self._foco_entrada()
+
+    def _alternar_razonamiento(self) -> None:
+        if self._label_razonamiento is None:
+            return
+        try:
+            if self._label_razonamiento.winfo_ismapped():
+                self._label_razonamiento.grid_remove()
+            else:
+                self._label_razonamiento.grid()
+        except Exception:  # pragma: no cover
+            pass
+
+
+def main() -> int:
+    """Arranque directo de la GUI (normalmente se usa main.py)."""
+    if ctk is None:
+        mostrar_error_fatal(
+            "No se pudo cargar CustomTkinter.\n\n"
+            "Instálalo manualmente con:\n    pip install customtkinter"
+        )
+        return 1
+
+    base = os.path.dirname(os.path.abspath(__file__))
+    if base not in sys.path:
+        sys.path.insert(0, base)
+
+    from motor import MotorConversacional
+    from explicacion import Explicador
+
+    try:
+        motor = MotorConversacional(ruta_kb=os.path.join(base, "conocimiento", "reglas.json"))
+    except FileNotFoundError as exc:
+        mostrar_error_fatal(f"No se encontró la base de conocimiento: {exc}")
+        return 1
+
+    app = ChatApp(motor=motor, explicador=Explicador())
+    app.mainloop()
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
