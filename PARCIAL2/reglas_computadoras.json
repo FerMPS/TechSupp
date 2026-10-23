@@ -1,0 +1,67 @@
+{
+  "dominio": "reparacion_de_computadoras",
+  "descripcion": "Sistema experto basico para diagnosticar fallas comunes en equipos de computo y sugerir acciones de reparacion.",
+  "reglas": [
+    {
+      "id": "r1",
+      "nombre": "Equipo no enciende por falta de energia",
+      "si": [
+        "el equipo no enciende",
+        "el cable de alimentacion esta desconectado o el tomacorriente no suministra energia"
+      ],
+      "entonces": {
+        "falla": "Falta de suministro electrico",
+        "accion": "Verificar que el cable de alimentacion este bien conectado, probar otro tomacorriente y confirmar que el interruptor de la fuente este encendido."
+      }
+    },
+    {
+      "id": "r2",
+      "nombre": "Pantalla negra con equipo encendido",
+      "si": [
+        "el equipo enciende (ventiladores o luces activos)",
+        "la pantalla permanece negra",
+        "no se escucha el sonido de inicio del sistema"
+      ],
+      "entonces": {
+        "falla": "Problema de video o memoria RAM mal asentada",
+        "accion": "Revisar la conexion del monitor, probar con otro cable o monitor, y reasentar o cambiar la memoria RAM."
+      }
+    },
+    {
+      "id": "r3",
+      "nombre": "Equipo se apaga solo",
+      "si": [
+        "el equipo se apaga solo despues de un tiempo de uso",
+        "el equipo se calienta demasiado"
+      ],
+      "entonces": {
+        "falla": "Sobrecalentamiento del procesador",
+        "accion": "Limpiar ventiladores y disipadores, renovar la pasta termica y verificar que los ventiladores giren correctamente."
+      }
+    },
+    {
+      "id": "r4",
+      "nombre": "Equipo muy lento",
+      "si": [
+        "el equipo tarda mucho en iniciar o abrir programas",
+        "el uso de disco o memoria esta constantemente al 100 por ciento"
+      ],
+      "entonces": {
+        "falla": "Saturacion de recursos por software o disco deteriorado",
+        "accion": "Revisar programas de inicio, escanear en busca de malware, liberar espacio en disco y evaluar el reemplazo por un disco SSD."
+      }
+    },
+    {
+      "id": "r5",
+      "nombre": "Sin conexion a internet",
+      "si": [
+        "el equipo no tiene acceso a internet",
+        "otros dispositivos en la misma red si tienen conexion"
+      ],
+      "entonces": {
+        "falla": "Problema de red local del equipo",
+        "accion": "Revisar el adaptador de red, renovar la IP (ipconfig /release y /renew), reiniciar el router y verificar los DNS."
+      }
+    }
+  ]
+}

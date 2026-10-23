@@ -384,6 +384,138 @@
         "Ejecuta solucionador de audio si está disponible."
       ],
       "explicacion": "Lo más común es dispositivo de salida incorrecto o driver."
+    },
+    "___REGLA_1_SI_ENTONCES___": {
+      "comentario": "=== REGLA 1 (SI-ENTONCES) === SI: es_laptop Y se_calienta Y se_apaga_solo ENTONCES: Sobrecalentamiento crítico portátil"
+    },
+    "H_SOBRECALENTAMIENTO_CRITICO": {
+      "titulo": "Sobrecalentamiento CRÍTICO en portátil",
+      "preguntar": [
+        "es_laptop",
+        "se_apaga_solo",
+        "calienta"
+      ],
+      "pasos": [
+        "INMEDIATO: Dejar enfriar completamente (30-60 min) sobre superficie dura.",
+        "Verificar que las rejillas de ventilación NO estén obstruidas.",
+        "Usar base refrigerante SOLO si es necesario, pero NO forzar uso.",
+        "Limpieza profesional de ventiladores y cambio de pasta térmica URGENTE.",
+        "SI SE APAGA CONSTANTEMENTE: NO usar hasta revisión técnica (riesgo de daño permanente)."
+      ],
+      "explicacion": "SI es_laptop Y se calienta Y se apaga solo = Sobrecalentamiento crítico. Requiere atención inmediata."
+    },
+    "___REGLA_2_SI_ENTONCES___": {
+      "comentario": "=== REGLA 2 (SI-ENTONCES) === SI: enciende Y llega_a_so Y lento Y sospecha_disco ENTONCES: Degradación de disco HDD"
+    },
+    "H_DISCO_DEGRADADO": {
+      "titulo": "Posible degradación de disco duro (HDD)",
+      "preguntar": [
+        "enciende",
+        "llega_a_so",
+        "lento",
+        "sospecha_disco"
+      ],
+      "pasos": [
+        "HACER COPIA DE SEGURIDAD INMEDIATAMENTE de datos importantes.",
+        "Ejecutar CrystalDiskInfo/HD Tune para comprobar estado SMART.",
+        "Si hay sectores reasignados o advertencias SMART: REEMPLAZAR disco YA.",
+        "Considerar migración a SSD para mejor rendimiento y fiabilidad.",
+        "SI EMPIEZA A HACER CLICS: Detener uso y derivar a recuperación especializada."
+      ],
+      "explicacion": "SI enciende Y llega_a_so Y va lento Y hay sospecha de disco = Disco HDD con posible degradación. Backup prioritario."
     }
-  }
+  },
+  "hipotesis": [
+    {
+      "id": "H_BSOD",
+      "match": [
+        "bsod"
+      ],
+      "prioridad": 95
+    },
+    {
+      "id": "H_NO_ENCIENDE",
+      "match": [
+        "no_enciende",
+        "sin_luces"
+      ],
+      "prioridad": 94
+    },
+    {
+      "id": "H_RUIDO_DISCO",
+      "match": [
+        "ruidos",
+        "disco"
+      ],
+      "prioridad": 93
+    },
+    {
+      "id": "H_SIN_IMAGEN",
+      "match": [
+        "sin_imagen"
+      ],
+      "prioridad": 92
+    },
+    {
+      "id": "H_ARRANQUE_SO",
+      "match": [
+        "queda_logo"
+      ],
+      "prioridad": 90
+    },
+    {
+      "id": "H_NO_CARGA",
+      "match": [
+        "carga"
+      ],
+      "prioridad": 88
+    },
+    {
+      "id": "H_CALIENTA",
+      "match": [
+        "calienta"
+      ],
+      "prioridad": 86
+    },
+    {
+      "id": "H_LENTO",
+      "match": [
+        "lento"
+      ],
+      "prioridad": 80
+    },
+    {
+      "id": "H_WIFI",
+      "match": [
+        "wifi"
+      ],
+      "prioridad": 75
+    },
+    {
+      "id": "H_AUDIO",
+      "match": [
+        "audio"
+      ],
+      "prioridad": 75
+    },
+    {
+      "id": "H_SOBRECALENTAMIENTO_CRITICO",
+      "match": [
+        "es_laptop",
+        "se_apaga_solo",
+        "calienta"
+      ],
+      "prioridad": 97
+    },
+    {
+      "id": "H_DISCO_DEGRADADO",
+      "match": [
+        "enciende",
+        "llega_a_so",
+        "lento",
+        "sospecha_disco"
+      ],
+      "prioridad": 96
+    }
+  ]
 }

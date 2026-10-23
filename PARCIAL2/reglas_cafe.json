@@ -1,0 +1,67 @@
+{
+  "dominio": "diagnostico_agricola_cafeto",
+  "descripcion": "Sistema experto basico para revisar hojas y frutos del cafeto e identificar si la planta esta sana o presenta plagas o enfermedades.",
+  "reglas": [
+    {
+      "id": "r1",
+      "nombre": "Hoja sana",
+      "si": [
+        "la hoja presenta color verde uniforme",
+        "la hoja no muestra manchas, polvillo ni galerias",
+        "el fruto no presenta agujeros"
+      ],
+      "entonces": {
+        "estado": "Planta sana",
+        "accion": "Mantener las practicas de fertilizacion, poda y monitoreo periodico preventivo."
+      }
+    },
+    {
+      "id": "r2",
+      "nombre": "Roya del cafeto",
+      "si": [
+        "se observa polvillo amarillo-naranja en el enves de la hoja",
+        "las hojas afectadas presentan amarillamiento y caida prematura"
+      ],
+      "entonces": {
+        "estado": "Roya (Hemileia vastatrix)",
+        "accion": "Aplicar fungicida a base de cobre, eliminar hojas afectadas y mejorar la ventilacion del cafetal mediante poda."
+      }
+    },
+    {
+      "id": "r3",
+      "nombre": "Ojo de gallo",
+      "si": [
+        "se observan manchas redondas de color marron con borde oscuro en la hoja",
+        "las manchas presentan un centro claro o grisaceo"
+      ],
+      "entonces": {
+        "estado": "Ojo de gallo (Mycena citricolor)",
+        "accion": "Retirar y destruir hojas enfermas, reducir la humedad excesiva y aplicar fungicida preventivo."
+      }
+    },
+    {
+      "id": "r4",
+      "nombre": "Minador de la hoja",
+      "si": [
+        "se observan caminos o galerias claras dentro de la hoja",
+        "las galerias son hechas por una larva o gusano y terminan en una pequena ampolla"
+      ],
+      "entonces": {
+        "estado": "Minador de la hoja (Leucoptera coffeella)",
+        "accion": "Realizar control biologico con avispas parasitoides, podar ramas afectadas y aplicar insecticida especifico si la infestacion es alta."
+      }
+    },
+    {
+      "id": "r5",
+      "nombre": "Broca del cafe",
+      "si": [
+        "el grano de cafe presenta un agujero pequeno en la superficie",
+        "al abrir el grano se encuentra una galeria o un insecto pequeno en su interior"
+      ],
+      "entonces": {
+        "estado": "Broca del cafe (Hypothenemus hampei)",
+        "accion": "Recolectar y destruir los granos perforados, realizar trampas con atrayentes y aplicar control biologico con Beauveria bassiana."
+      }
+    }
+  ]
+}
